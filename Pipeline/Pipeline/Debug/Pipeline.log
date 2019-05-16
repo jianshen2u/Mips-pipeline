@@ -1,2 +1,4 @@
 ﻿  MIPSPipeline2.c
-  Pipeline.vcxproj -> C:\Users\bongj\Desktop\Pipeline\Pipeline\Debug\Pipeline.exe
+C:\Users\bongj\Documents\GitHub\Mips-pipeline\Pipeline\Pipeline\MIPSPipeline2.c(230): warning C4018: '>=': signed/unsigned mismatch
+C:\Users\bongj\Documents\GitHub\Mips-pipeline\Pipeline\Pipeline\MIPSPipeline2.c(931): warning C4018: '>=': signed/unsigned mismatch
+  Pipeline.vcxproj -> C:\Users\bongj\Documents\GitHub\Mips-pipeline\Pipeline\Debug\Pipeline.exe

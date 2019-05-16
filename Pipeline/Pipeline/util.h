@@ -197,19 +197,22 @@ uint32_t PC_jump;
 int stall_IF_ID_count; // stall count for stalling IF stage only
 int stall_ID_EX_count; // stall count for stalling IF, ID stages
 
-extern mem_region_t MEM_REGIONS[2];
 extern int INSTRUCTION_COUNT;
 extern int CYCLE_COUNT;
 /* Functions */
 
-uint32_t	mem_read_32(uint32_t address);
-void		mem_write_32(uint32_t address, uint32_t value);
+uint32_t	mem_read(uint32_t address);
+void		mem_write(uint32_t address, uint32_t value);
 void		run(int num_cycles);
 void		cycle();
-void		init_inst_info();
+void		init_inst_info(int x);
 void		rdump();
 void		pdump();
-void		mdump(int start, int stop);
+void		mdump();
+int			count();
+void		init_mem();
+void		loadprogram(int x);
+
 
 extern void process_instruction();
 /*flush functions*/

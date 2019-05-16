@@ -72,15 +72,16 @@ LOAD_INST_BASE (DEST_A, (LD & (MASK)))	\
 }
 
 /* functions */
-unsigned long get_inst_info(unsigned long pc);
+uint32_t get_inst_info(uint32_t pc);
 void process_instruction();
 void process_IF();
 void process_ID();
-void generate_control_signals(unsigned long inst);
+void generate_control_signals(uint32_t inst, int opcode, int func, int addr, int rs, int rt);
 void process_EX();
 void process_MEM();
 void process_WB();
 uint32_t ALU(int control_line, uint32_t data1, uint32_t data2);
+
 
 
 #endif
