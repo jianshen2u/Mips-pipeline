@@ -7,11 +7,10 @@
 #include "run.h"
 
 CPU_State CURRENT_STATE;
-
 int NUM_INST;
-uint32_t *INST_INFO;
+uint32_t* INST_INFO;
 int MEM[0x100000 / 4];
-
+int REG[32];
 bool isDebug = false;
 
 int INSTRUCTION_COUNT;
@@ -22,18 +21,19 @@ int main(void)
 	int x;
 	NUM_INST = 0;
 	init_mem();
-	NUM_INST = count();
-	loadprogram(NUM_INST);
-	
+	x = count();
+	loadprogram(x);
+
 	if (isDebug)
 	{
-		for (int i = 0; i < NUM_INST ; i++)
+		for (int i = 0; i < NUM_INST; i++)
 		{
 			printf("INST_INFO	[0x%08X]: 0x%08X\n", i << 2, INST_INFO[i]);
 		}
 	}
-	x = NUM_INST;
+
 	PC_buffer = 0;
+	CURRENT_STATE.PC = 0;
 	run(x);
 	pdump();
 	rdump();
@@ -42,67 +42,6 @@ int main(void)
 	printf("Cycle count: %d \n", CYCLE_COUNT);
 	printf("REGISTER 2 value : 0x%08x\n", CURRENT_STATE.REGS[2]);
 	return 0;
-}
-/*=====================================================*/
-/*					run program						   */
-/*			Runs the program until the end .		   */
-/*=====================================================*/
-
-void run(int num_inst)
-{
-	int i = 0;
-	for (INSTRUCTION_COUNT = 0; i < num_inst;) {
-
-		if (reachedEnd) {
-			cycle();
-			pdump();
-			cycle();
-			pdump();
-			cycle();
-			pdump();
-			cycle();
-			pdump();
-			break;
-		}
-		cycle();
-	}
-}
-
-/*=====================================================*/
-/*					cycle()							   */
-/*			Execute programs once.					   */
-/*=====================================================*/
-
-void cycle() 
-{
-	process_instruction();
-	CYCLE_COUNT++;
-}
-
-/*=====================================================*/
-/*					count()							   */
-/*			Counts number of instructions.			   */
-/*=====================================================*/
-
-int count()
-{
-	FILE* fp = NULL;
-	int ret = 0;
-	unsigned int data;
-	NUM_INST = 0;
-
-	fp = fopen("test_prog/simple.bin", "rb");
-	if (fp == NULL) {
-		printf("no file: %s\n", "input4.bin");
-		return 0;
-	}
-	while (1) {
-		ret = fread(&data, sizeof(int), 1, fp);
-		if (ret == 0) break;
-		NUM_INST++;
-	}
-	fclose(fp);
-	return NUM_INST++;
 }
 
 /*=====================================================*/
@@ -133,6 +72,27 @@ void init_inst_info(int x)
 	}
 }
 
+int count()
+{
+	FILE* fp = NULL;
+	int ret = 0;
+	unsigned int data;
+	NUM_INST = 0;
+
+	fp = fopen("test_prog/simple2.bin", "rb");
+	if (fp == NULL) {
+		printf("no file: %s\n", "input4.bin");
+		return 0;
+	}
+	while (1) {
+		ret = fread(&data, sizeof(int), 1, fp);
+		if (ret == 0) break;
+		NUM_INST++;
+	}
+	fclose(fp);
+	return NUM_INST;
+}
+
 /*=====================================================*/
 /*					loadprogram()					   */
 /*		Loads program into the instruction memory.	   */
@@ -148,7 +108,7 @@ void loadprogram(int x)
 
 	init_inst_info(x);
 
-	fp = fopen("test_prog/simple.bin", "rb");
+	fp = fopen("test_prog/simple2.bin", "rb");
 	if (fp == NULL) {
 		printf("no file: %s\n", "input4.bin");
 		return;
@@ -159,9 +119,47 @@ void loadprogram(int x)
 
 		inst2 = (data & 0xff) << 24 | (data & 0xff00) << 8 | (data & 0xff0000) >> 8 | (data & 0xff000000) >> 24;
 		INST_INFO[i] = inst2;
+		MEM[i] = inst2;
 		i++;
 	}
 	fclose(fp);
+}
+
+/*=====================================================*/
+/*					run program						   */
+/*			Runs the program until the end .		   */
+/*=====================================================*/
+
+void run(int num_inst)
+{
+	int i = 0;
+	for (INSTRUCTION_COUNT = 0; i < num_inst; ) {
+
+		if (reachedEnd) {
+			cycle();
+			pdump();
+			cycle();
+			pdump();
+			cycle();
+			pdump();
+			cycle();
+			pdump();
+			break;
+		}
+		cycle();
+	}
+}
+
+
+/*=====================================================*/
+/*					cycle()							   */
+/*			Execute programs once.					   */
+/*=====================================================*/
+
+void cycle()
+{
+	process_instruction();
+	CYCLE_COUNT++;
 }
 
 /*=====================================================*/
@@ -227,11 +225,11 @@ void process_IF()
 
 uint32_t get_inst_info(uint32_t pc)
 {
-	if (isDebug) 
+	if (isDebug)
 	{
 		printf("get_inst_info :  pc value is : 0x%08x, this is : %d, text size is  %d\n", pc, ((pc - MEM_TEXT_START) >> 2), NUM_INST);
 	}
-	if (((pc) >> 2) >= NUM_INST) 
+	if (((pc) >> 2) >= NUM_INST)
 	{
 		CURRENT_STATE.PC = 0;
 		IF_ID_pipeline_buffer.CURRENTPC = 0;
@@ -240,37 +238,6 @@ uint32_t get_inst_info(uint32_t pc)
 		return 0;
 	}
 	return INST_INFO[pc >> 2];
-}
-
-/*=====================================================*/
-/*			process_wb()			     			   */
-/*			Writeback stage.						   */
-/*=====================================================*/
-
-void process_WB() 
-{
-	MEM_WB prevMEM_WB_pipeline = CURRENT_STATE.MEM_WB_pipeline;
-	if (prevMEM_WB_pipeline.instr_debug) { // not no-op
-		INSTRUCTION_COUNT++;
-	}
-
-	// MUX for which data to write.
-	uint32_t writeData;
-	if (prevMEM_WB_pipeline.MemToReg) {
-		writeData = prevMEM_WB_pipeline.Mem_OUT;
-	}
-	else {
-		writeData = prevMEM_WB_pipeline.ALU_OUT;
-	}
-
-	// Write data if (RegWrite == 1)
-	if (prevMEM_WB_pipeline.RegWrite) {
-		CURRENT_STATE.REGS[prevMEM_WB_pipeline.RegDstNum] = writeData;
-	}
-	if (isDebug)
-	{
-		printf("*debug process_WB: PC 0x%08x, instr %08x\n", prevMEM_WB_pipeline.CURRENTPC, prevMEM_WB_pipeline.instr_debug);
-	}
 }
 
 /*=====================================================*/
@@ -288,6 +255,7 @@ void process_ID() {
 	int func;
 	int addr;
 	int imm;
+	int shamt;
 	IF_ID prevIF_ID_pipeline = CURRENT_STATE.IF_ID_pipeline;
 	ID_EX_pipeline_buffer.NPC = prevIF_ID_pipeline.NPC;
 	ID_EX_pipeline_buffer.CURRENTPC = prevIF_ID_pipeline.CURRENTPC;
@@ -301,6 +269,8 @@ void process_ID() {
 	rd = (inst & RD) >> 11;
 	func = (inst & FUNCT);
 	addr = (inst & 0x3ffffff);
+	shamt = (inst & SHAMT) >> 6;
+
 	if ((inst & 0xffff) >= 0x8000)//shift immediate value
 	{
 		imm = ((inst & 0xffff) | 0xffff0000);
@@ -316,28 +286,32 @@ void process_ID() {
 	generate_control_signals(inst, opcode, func, addr, rs, rt);
 
 	// Read register rs and rt
-	ID_EX_pipeline_buffer.REG1 = CURRENT_STATE.REGS[rs];
-	ID_EX_pipeline_buffer.REG2 = CURRENT_STATE.REGS[rt];
+	ID_EX_pipeline_buffer.v1 = REG[rs];
+	ID_EX_pipeline_buffer.v2 = REG[rt];
 
 	// sign-extend Immediate value
-	if (opcode == ANDI || opcode == ORI) ID_EX_pipeline_buffer.IMM = ZERO_EX(IMM(inst));
-	else ID_EX_pipeline_buffer.IMM = SIGN_EX(IMM(inst));
+	//if (opcode == ANDI || opcode == ORI) ID_EX_pipeline_buffer.imm = ZERO_EX(IMM(inst));
+	//else ID_EX_pipeline_buffer.IMM = SIGN_EX(IMM(inst));
 
 	// transfer possible register write destinations (11-15 and 16-20)
-	ID_EX_pipeline_buffer.RS2 = rs; // inst [21-25]
-	ID_EX_pipeline_buffer.RT2 = rt; // inst [16-20]
-	ID_EX_pipeline_buffer.RD2 = rd; // inst [11-15]
-	ID_EX_pipeline_buffer.SHAMT2 = s_imm;
+	ID_EX_pipeline_buffer.rs = rs; // inst [21-25]
+	ID_EX_pipeline_buffer.rt = rt; // inst [16-20]
+	ID_EX_pipeline_buffer.rd = rd; // inst [11-15]
+	ID_EX_pipeline_buffer.imm = imm;
+	ID_EX_pipeline_buffer.opcode = opcode; // inst [21-25]
+	ID_EX_pipeline_buffer.func = func; // inst [16-20]
+	ID_EX_pipeline_buffer.addr = addr; // inst [11-15]
+	ID_EX_pipeline_buffer.shamt = shamt;
 
 	if (globaljal) {
-		ID_EX_pipeline_buffer.REG1 = 0;
-		ID_EX_pipeline_buffer.REG2 = 0;
-		ID_EX_pipeline_buffer.IMM = CURRENT_STATE.PC;
-		ID_EX_pipeline_buffer.RD2 = 31;
+		ID_EX_pipeline_buffer.v1 = 0;
+		ID_EX_pipeline_buffer.v2 = 0;
+		ID_EX_pipeline_buffer.imm = CURRENT_STATE.PC;
+		ID_EX_pipeline_buffer.rd = 31;
 	}
 	if (isDebug) {
 		printf("*debug process_ID: CURRENTPC 0x%08x, instr 0x%08x\n", ID_EX_pipeline_buffer.CURRENTPC, inst);
-		printf("    RS %d, REG1 %d, RT %d, REG2 %d, RD %d, imm %08x, shamt %d\n", rs, ID_EX_pipeline_buffer.REG1, rt, ID_EX_pipeline_buffer.REG2, rd, ID_EX_pipeline_buffer.IMM, ID_EX_pipeline_buffer.SHAMT2);
+		printf("    RS %d, REG1 %d, RT %d, REG2 %d, RD %d, imm %08x, shamt %d\n", rs, REG[ID_EX_pipeline_buffer.rs], rt, REG[ID_EX_pipeline_buffer.rd], rd, ID_EX_pipeline_buffer.imm, ID_EX_pipeline_buffer.shamt);
 	}
 }
 
@@ -346,7 +320,7 @@ void process_ID() {
 /*			Generate all control signals			   */
 /*=====================================================*/
 
-void generate_control_signals(uint32_t instr, int opcode,int func, int addr,int rs , int rt) {
+void generate_control_signals(uint32_t instr, int opcode, int func, int addr, int rs, int rt) {
 	bool jump = false;
 	bool jal = false;
 	bool jumpandreturn = false;
@@ -526,7 +500,7 @@ void generate_control_signals(uint32_t instr, int opcode,int func, int addr,int 
 	if (jump) {
 		PC_jump = ((CURRENT_STATE.PC + 4) & 0xF0000000) + (addr << 2);
 		if (globalJumpAndReturn) {
-			PC_jump = CURRENT_STATE.REGS[31];
+			PC_jump = REG[31];
 		}
 	}
 
@@ -546,7 +520,7 @@ void generate_control_signals(uint32_t instr, int opcode,int func, int addr,int 
 	// ALU operation followed by lw instruction
 	if (ALUinstruction) {
 		if (CURRENT_STATE.ID_EX_pipeline.MEM_MemRead) {
-			if ((CURRENT_STATE.ID_EX_pipeline.RT2 == rs) | (CURRENT_STATE.ID_EX_pipeline.RT2 == rt))
+			if ((CURRENT_STATE.ID_EX_pipeline.rt == rs) | (CURRENT_STATE.ID_EX_pipeline.rt == rt))
 			{
 				stall_ID_EX_count = 1 + 1;
 			}
@@ -562,6 +536,7 @@ void generate_control_signals(uint32_t instr, int opcode,int func, int addr,int 
 		printf("    PC_jump %08x\n", PC_jump);
 	}
 }
+
 /*=====================================================*/
 /*			process_EX()							   */
 /*			Executes ALU operations					   */
@@ -581,49 +556,62 @@ void process_EX() {
 	EX_MEM_pipeline_buffer.Branch = prevID_EX_pipeline.MEM_Branch;
 
 	// PC (for Branch instruction)
-	EX_MEM_pipeline_buffer.NPC = prevID_EX_pipeline.NPC + (prevID_EX_pipeline.IMM << 2);
+	EX_MEM_pipeline_buffer.NPC = prevID_EX_pipeline.NPC + (prevID_EX_pipeline.imm << 2);
+
+	//shift data
+	// transfer possible register write destinations (11-15 and 16-20)
+	EX_MEM_pipeline_buffer.rs = prevID_EX_pipeline.rs; // inst [21-25]
+	EX_MEM_pipeline_buffer.rt = prevID_EX_pipeline.rt; // inst [16-20]
+	EX_MEM_pipeline_buffer.rd = prevID_EX_pipeline.rd; // inst [11-15]
+	EX_MEM_pipeline_buffer.imm = prevID_EX_pipeline.imm;
+	EX_MEM_pipeline_buffer.opcode = prevID_EX_pipeline.opcode; // inst [21-25]
+	EX_MEM_pipeline_buffer.func = prevID_EX_pipeline.func; // inst [16-20]
+	EX_MEM_pipeline_buffer.addr = prevID_EX_pipeline.addr; // inst [11-15]
+	EX_MEM_pipeline_buffer.shamt = prevID_EX_pipeline.shamt;
+	EX_MEM_pipeline_buffer.v1 = prevID_EX_pipeline.v1;
+	EX_MEM_pipeline_buffer.v2 = prevID_EX_pipeline.v2;
 
 	int forwardA = 00;
 	int forwardB = 00;
 
 	// Forwarding unit.
-	
-		if (isDebug) printf("RegDstNum %d, RS %d, RT %d\n", CURRENT_STATE.EX_MEM_pipeline.RegDstNum, CURRENT_STATE.ID_EX_pipeline.RS2, CURRENT_STATE.ID_EX_pipeline.RT2);
 
-		// EX hazard
-		if (CURRENT_STATE.EX_MEM_pipeline.WB_RegWrite) {
-			if (CURRENT_STATE.EX_MEM_pipeline.RegDstNum != 0) {
-				if (CURRENT_STATE.EX_MEM_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.RS2) {
-					if (isDebug) printf("EX Hazard detected!!!!! \n");
-					forwardA = 10;
+	if (isDebug) printf("RegDstNum %d, RS %d, RT %d\n", CURRENT_STATE.EX_MEM_pipeline.RegDstNum, CURRENT_STATE.ID_EX_pipeline.rs, CURRENT_STATE.ID_EX_pipeline.rt);
+
+	// EX hazard
+	if (CURRENT_STATE.EX_MEM_pipeline.WB_RegWrite) {
+		if (CURRENT_STATE.EX_MEM_pipeline.RegDstNum != 0) {
+			if (CURRENT_STATE.EX_MEM_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.rs) {
+				if (isDebug) printf("EX Hazard detected!!!!! \n");
+				forwardA = 10;
+			}
+			if (CURRENT_STATE.EX_MEM_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.rt) {
+				if (isDebug) printf("EX Hazard detected!!!!! \n");
+				forwardB = 10;
+			}
+		}
+	}
+
+	// MEM hazard
+	if (CURRENT_STATE.MEM_WB_pipeline.RegWrite) {
+		if (CURRENT_STATE.MEM_WB_pipeline.RegDstNum != 0) {
+			if (!(CURRENT_STATE.EX_MEM_pipeline.WB_RegWrite && (CURRENT_STATE.EX_MEM_pipeline.RegDstNum != 0) && (CURRENT_STATE.EX_MEM_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.rs))) {
+
+				if (CURRENT_STATE.MEM_WB_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.rs) {
+					if (isDebug) printf("MEM Hazard detected!!!!! \n");
+					forwardA = 01;
 				}
-				if (CURRENT_STATE.EX_MEM_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.RT2) {
-					if (isDebug) printf("EX Hazard detected!!!!! \n");
-					forwardB = 10;
+			}
+
+			if (!(CURRENT_STATE.EX_MEM_pipeline.WB_RegWrite && (CURRENT_STATE.EX_MEM_pipeline.RegDstNum != 0) && (CURRENT_STATE.EX_MEM_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.rt))) {
+
+				if (CURRENT_STATE.MEM_WB_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.rt) {
+					if (isDebug) printf("MEM Hazard detected!!!!! \n");
+					forwardB = 01;
 				}
 			}
 		}
-
-		// MEM hazard
-		if (CURRENT_STATE.MEM_WB_pipeline.RegWrite) {
-			if (CURRENT_STATE.MEM_WB_pipeline.RegDstNum != 0) {
-				if (!(CURRENT_STATE.EX_MEM_pipeline.WB_RegWrite && (CURRENT_STATE.EX_MEM_pipeline.RegDstNum != 0) && (CURRENT_STATE.EX_MEM_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.RS2))) {
-
-					if (CURRENT_STATE.MEM_WB_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.RS2) {
-						if (isDebug) printf("MEM Hazard detected!!!!! \n");
-						forwardA = 01;
-					}
-				}
-
-				if (!(CURRENT_STATE.EX_MEM_pipeline.WB_RegWrite && (CURRENT_STATE.EX_MEM_pipeline.RegDstNum != 0) && (CURRENT_STATE.EX_MEM_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.RT2))) {
-
-					if (CURRENT_STATE.MEM_WB_pipeline.RegDstNum == CURRENT_STATE.ID_EX_pipeline.RT2) {
-						if (isDebug) printf("MEM Hazard detected!!!!! \n");
-						forwardB = 01;
-					}
-				}
-			}
-		}
+	}
 
 	// end of "forwardingEnabled"
 
@@ -633,7 +621,7 @@ void process_EX() {
 
 	// 3 to 1 MUX
 	if (forwardA == 00) {
-		ALUinput1 = prevID_EX_pipeline.REG1;
+		ALUinput1 = prevID_EX_pipeline.v1;
 	}
 	else if (forwardA == 10) {
 		ALUinput1 = CURRENT_STATE.EX_MEM_pipeline.ALU_OUT;
@@ -655,7 +643,7 @@ void process_EX() {
 
 	// 3 to 1 MUX
 	if (forwardB == 00) {
-		ALUinput2 = prevID_EX_pipeline.REG2;
+		ALUinput2 = prevID_EX_pipeline.v2;
 	}
 	else if (forwardB == 10) {
 		ALUinput2 = CURRENT_STATE.EX_MEM_pipeline.ALU_OUT;
@@ -682,18 +670,18 @@ void process_EX() {
 	// if ALUSrc == 1, the second ALU operand is the sign-extended, lower 16 bits of the instruction.
 	// if ALUSrc == 0, the second ALU operand comes from the second register file output. (Read data 2).
 	if (prevID_EX_pipeline.ALUSrc) {
-		ALUinput2 = prevID_EX_pipeline.IMM;
+		ALUinput2 = prevID_EX_pipeline.imm;
 	}
 
 
 
 	// calculate ALU control
-	int funct_field = (prevID_EX_pipeline.IMM & FUNCT); // extract funct field from instruction[0~15]
+	int funct_field = (prevID_EX_pipeline.imm & FUNCT); // extract funct field from instruction[0~15]
 	int control_line = prevID_EX_pipeline.ALUControl;
 
 	// Special case for shift commands (srl, sll)
 	if ((control_line == 4) || (control_line == 5)) {
-		ALUinput1 = (prevID_EX_pipeline.instr_debug & SHAMT)  >> 6 ;
+		ALUinput1 = (prevID_EX_pipeline.instr_debug & SHAMT) >> 6;
 	}
 
 	// process ALU
@@ -706,10 +694,10 @@ void process_EX() {
 	// if RegDst == 1, the register destination number for the Write register comes from the rd field.(bits 15:11)
 	// if RegDst == 0, the register destination number for the Write register comes from the rt field.(bits 20:16)
 	if (prevID_EX_pipeline.RegDst) {
-		EX_MEM_pipeline_buffer.RegDstNum = prevID_EX_pipeline.RD2;
+		EX_MEM_pipeline_buffer.RegDstNum = prevID_EX_pipeline.rd;
 	}
 	else {
-		EX_MEM_pipeline_buffer.RegDstNum = prevID_EX_pipeline.RT2;
+		EX_MEM_pipeline_buffer.RegDstNum = prevID_EX_pipeline.rt;
 	}
 	if (isDebug) {
 		printf("*debug process_EX: CURRENTPC 0x%08x, instr %08x\n", EX_MEM_pipeline_buffer.CURRENTPC, EX_MEM_pipeline_buffer.instr_debug);
@@ -777,9 +765,9 @@ void process_MEM() {
 	if (prevEX_MEM_pipeline.Branch) { // branch condition
 		if (prevEX_MEM_pipeline.zero) {
 			// if the branch Prediction was enabled, this is handled by generatecontrolsignal in ID stage.
-			
-				PC_jump = prevEX_MEM_pipeline.NPC;
-			
+
+			PC_jump = prevEX_MEM_pipeline.NPC;
+
 		}
 		else {
 			PC_buffer = prevEX_MEM_pipeline.CURRENTPC + 4;
@@ -792,12 +780,12 @@ void process_MEM() {
 
 	if (CURRENT_STATE.MEM_WB_pipeline.MemRead & CURRENT_STATE.EX_MEM_pipeline.MemWrite)
 	{
-			if (CURRENT_STATE.EX_MEM_pipeline.RegDstNum == CURRENT_STATE.MEM_WB_pipeline.RegDstNum) {
-				mem_write(prevEX_MEM_pipeline.ALU_OUT, CURRENT_STATE.MEM_WB_pipeline.Mem_OUT);
-				forwardingDone = true;
-			}
+		if (CURRENT_STATE.EX_MEM_pipeline.RegDstNum == CURRENT_STATE.MEM_WB_pipeline.RegDstNum) {
+			mem_write(prevEX_MEM_pipeline.ALU_OUT, CURRENT_STATE.MEM_WB_pipeline.Mem_OUT);
+			forwardingDone = true;
+		}
 	}
-	
+
 
 	// Read data from memory
 	if (prevEX_MEM_pipeline.MemRead) {
@@ -821,24 +809,23 @@ void process_MEM() {
 }
 
 /*=====================================================*/
-/*			mem_read()								   */
-/*			read memory.							   */
-/*=====================================================*/
-uint32_t mem_read(uint32_t address)
-{
-	return (INST_INFO[address / 4]);			
-}
-
-
-/*=====================================================*/
 /*			mem_write()								   */
 /*			Write memory.							   */
 /*=====================================================*/
 void mem_write(uint32_t address, uint32_t value)
 {
 	value = (value & 0xff) << 24 | (value & 0xff00) << 8 | (value & 0xff0000) >> 8 | (value & 0xff000000) >> 24;
-	INST_INFO[address / 0x4] = value;
+	MEM[address / 0x4] = value;
 	return;
+}
+
+/*=====================================================*/
+/*			mem_read()								   */
+/*			read memory.							   */
+/*=====================================================*/
+uint32_t mem_read(uint32_t address)
+{
+	return (MEM[address / 4]);
 }
 
 /*=====================================================*/
@@ -866,12 +853,12 @@ void flush_ID_EX() {
 	CURRENT_STATE.ID_EX_pipeline.RegDst = false;
 	CURRENT_STATE.ID_EX_pipeline.ALUSrc = false;
 	CURRENT_STATE.ID_EX_pipeline.jump = false;
-	CURRENT_STATE.ID_EX_pipeline.REG1 = 0;
-	CURRENT_STATE.ID_EX_pipeline.REG2 = 0;
-	CURRENT_STATE.ID_EX_pipeline.IMM = 0;
-	CURRENT_STATE.ID_EX_pipeline.RS2 = 0;
-	CURRENT_STATE.ID_EX_pipeline.RT2 = 0;
-	CURRENT_STATE.ID_EX_pipeline.RD2 = 0;
+	CURRENT_STATE.ID_EX_pipeline.v1 = 0;
+	CURRENT_STATE.ID_EX_pipeline.v2 = 0;
+	CURRENT_STATE.ID_EX_pipeline.imm = 0;
+	CURRENT_STATE.ID_EX_pipeline.rs = 0;
+	CURRENT_STATE.ID_EX_pipeline.rt = 0;
+	CURRENT_STATE.ID_EX_pipeline.rd = 0;
 	CURRENT_STATE.ID_EX_pipeline.instr_debug = 0;
 }
 
@@ -917,8 +904,8 @@ void rdump() {
 void mdump() {
 	int address;
 	int start = 0;
-	int stop = NUM_INST* 4;
-	printf("Memory content [0x%08x..0x%08x] :\n", start , stop);
+	int stop = NUM_INST * 4;
+	printf("Memory content [0x%08x..0x%08x] :\n", start, stop);
 	printf("-------------------------------------\n");
 	for (address = 0; address < stop; address += 4)
 		printf("0x%08x: 0x%08x\n", address, mem_read(address));
@@ -966,4 +953,35 @@ void pdump() {
 	 */
 
 	printf("\n\n");
+}
+
+/*=====================================================*/
+/*			process_wb()			     			   */
+/*			Writeback stage.						   */
+/*=====================================================*/
+
+void process_WB()
+{
+	MEM_WB prevMEM_WB_pipeline = CURRENT_STATE.MEM_WB_pipeline;
+	if (prevMEM_WB_pipeline.instr_debug) { // not no-op
+		INSTRUCTION_COUNT++;
+	}
+
+	// MUX for which data to write.
+	uint32_t writeData;
+	if (prevMEM_WB_pipeline.MemToReg) {
+		writeData = prevMEM_WB_pipeline.Mem_OUT;
+	}
+	else {
+		writeData = prevMEM_WB_pipeline.ALU_OUT;
+	}
+
+	// Write data if (RegWrite == 1)
+	if (prevMEM_WB_pipeline.RegWrite) {
+		REG[prevMEM_WB_pipeline.RegDstNum] = writeData;
+	}
+	if (isDebug)
+	{
+		printf("*debug process_WB: PC 0x%08x, instr %08x\n", prevMEM_WB_pipeline.CURRENTPC, prevMEM_WB_pipeline.instr_debug);
+	}
 }

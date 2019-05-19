@@ -124,7 +124,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="MIPSPipeline2.c" />
+    <ClCompile Include="MIPSPipeline3.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="run.h" />

@@ -91,6 +91,7 @@ typedef struct idex_latch {
 	int NPC;
 	int CURRENTPC;
 
+
 	// Control Signals
 	bool WB_MemToReg;   // WB
 	bool WB_RegWrite;   // WB
@@ -106,6 +107,18 @@ typedef struct idex_latch {
 	bool jump;
 
 	// reg
+	int rs; //REG1
+	int rt; //REG2
+	int rd;
+	int s_imm; //IMM
+	int opcode;
+	int func;
+	int addr;
+	int imm;
+	int shamt;
+	int v1;
+	int v2;
+/*
 	uint32_t REG1;      // Reg[rs]
 	uint32_t REG2;      // Reg[rt]
 	uint32_t IMM; 		// immediate value
@@ -114,7 +127,7 @@ typedef struct idex_latch {
 	uint32_t RT2;		// rt, inst[16:20]
 	uint32_t RD2;		// rd, inst[11:15]
 	uint32_t SHAMT2;	// shamt, inst[6:10]
-
+*/
 	uint32_t instr_debug;
 }ID_EX;
 
@@ -134,6 +147,18 @@ typedef struct exmm_latch {
 
 	// reg
 	bool zero;
+
+	int rs; //REG1
+	int rt; //REG2
+	int rd;
+	int s_imm; //IMM
+	int opcode;
+	int func;
+	int addr;
+	int imm;
+	int shamt;
+	int v1;
+	int v2;
 	uint32_t ALU_OUT;
 	uint32_t data2;             // untouched data2 from register.
 	uint32_t RegDstNum; // 5 bit Register destination (if write)
