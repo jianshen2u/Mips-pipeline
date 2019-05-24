@@ -81,7 +81,7 @@ typedef struct ifid_latch {
 	int NPC;
 
 	//reg
-	unsigned int inst;
+	uint32_t inst;
 
 }IF_ID;
 
@@ -197,11 +197,6 @@ typedef struct CPU_State_Struct {
 
 } CPU_State;
 
-typedef struct {
-	uint32_t start, size;
-	uint8_t* mem;
-} mem_region_t;
-
 
 extern CPU_State CURRENT_STATE;
 
@@ -224,19 +219,17 @@ int stall_ID_EX_count; // stall count for stalling IF, ID stages
 
 extern int INSTRUCTION_COUNT;
 extern int CYCLE_COUNT;
-/* Functions */
 
+/* Functions */
 uint32_t	mem_read(uint32_t address);
 void		mem_write(uint32_t address, uint32_t value);
 void		run(int num_cycles);
 void		cycle();
-void		init_inst_info(int x);
 void		rdump();
 void		pdump();
 void		mdump();
-int			count();
 void		init_mem();
-void		loadprogram(int x);
+void		loadprogram();
 
 
 extern void process_instruction();

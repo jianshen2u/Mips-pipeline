@@ -12,35 +12,41 @@ uint32_t* INST_INFO;
 int MEM[0x100000 / 4];
 int REG[32];
 bool isDebug = false;
+bool branchPredictionEnabled = false;
 
 int INSTRUCTION_COUNT;
 int CYCLE_COUNT;
 
 int main(void)
 {
-	int x;
-	NUM_INST = 0;
-	init_mem();
-	x = count();
-	loadprogram(x);
-
-	if (isDebug)
+	
+	for (int i = 0; i < 32; i++)
 	{
-		for (int i = 0; i < NUM_INST; i++)
-		{
-			printf("INST_INFO	[0x%08X]: 0x%08X\n", i << 2, INST_INFO[i]);
-		}
+		REG[i] = 0;
 	}
 
+	REG[29] = 0x100000;
+	REG[31] = 0xFFFFFFFF;
+
+	NUM_INST = 0;
+
+	//init memory array
+	init_mem();
+
+	//loading program into memory array
+	loadprogram();
+
+	//set pc to 0;
 	PC_buffer = 0;
 	CURRENT_STATE.PC = 0;
-	run(x);
-	pdump();
+
+	//run program.
+	run(NUM_INST);
 	rdump();
 	mdump();
 	printf("Instruction count: %d \n", INSTRUCTION_COUNT);
 	printf("Cycle count: %d \n", CYCLE_COUNT);
-	printf("REGISTER 2 value : 0x%08x\n", CURRENT_STATE.REGS[2]);
+	printf("REGISTER 2 value : %d\n", REG[2]);
 	return 0;
 }
 
@@ -72,54 +78,34 @@ void init_inst_info(int x)
 	}
 }
 
-int count()
-{
-	FILE* fp = NULL;
-	int ret = 0;
-	unsigned int data;
-	NUM_INST = 0;
 
-	fp = fopen("test_prog/simple2.bin", "rb");
-	if (fp == NULL) {
-		printf("no file: %s\n", "input4.bin");
-		return 0;
-	}
-	while (1) {
-		ret = fread(&data, sizeof(int), 1, fp);
-		if (ret == 0) break;
-		NUM_INST++;
-	}
-	fclose(fp);
-	return NUM_INST;
-}
 
 /*=====================================================*/
 /*					loadprogram()					   */
 /*		Loads program into the instruction memory.	   */
 /*=====================================================*/
-void loadprogram(int x)
+void loadprogram()
 {
 	FILE* fp = NULL;
 	int ret = 0;
 	uint32_t data;
 	uint32_t inst2;
 	int i = 0;
-	INST_INFO = malloc(sizeof(unsigned int) * x);
 
-	init_inst_info(x);
+	//init_inst_info(x);
 
 	fp = fopen("test_prog/simple2.bin", "rb");
 	if (fp == NULL) {
 		printf("no file: %s\n", "input4.bin");
 		return;
 	}
-	while (i < x) {
+	while (1) {
 		ret = fread(&data, sizeof(int), 1, fp);
 		if (ret == 0) break;
-
+		
 		inst2 = (data & 0xff) << 24 | (data & 0xff00) << 8 | (data & 0xff0000) >> 8 | (data & 0xff000000) >> 24;
-		INST_INFO[i] = inst2;
 		MEM[i] = inst2;
+		NUM_INST++;
 		i++;
 	}
 	fclose(fp);
@@ -135,7 +121,7 @@ void run(int num_inst)
 	int i = 0;
 	for (INSTRUCTION_COUNT = 0; i < num_inst; ) {
 
-		if (reachedEnd) {
+		if (reachedEnd || (CURRENT_STATE.PC == 0xffffffff)) {
 			cycle();
 			pdump();
 			cycle();
@@ -147,6 +133,8 @@ void run(int num_inst)
 			break;
 		}
 		cycle();
+		//rdump();
+		//printf("\n\n\n");
 	}
 }
 
@@ -188,10 +176,12 @@ void process_instruction()
 	if (stall_ID_EX_count) flush_ID_EX();
 
 	process_IF();
+	process_WB();
+
 	process_ID();
 	process_EX();// Data Forwarding is done here 
 	process_MEM();
-	process_WB();
+	
 
 	if (stall_ID_EX_count) stall_ID_EX_count--;
 	if (stall_IF_ID_count) stall_IF_ID_count--;
@@ -237,7 +227,7 @@ uint32_t get_inst_info(uint32_t pc)
 		reachedEnd = true;
 		return 0;
 	}
-	return INST_INFO[pc >> 2];
+	return MEM[pc >> 2];
 }
 
 /*=====================================================*/
@@ -268,7 +258,7 @@ void process_ID() {
 	rt = (inst & RT) >> 16;
 	rd = (inst & RD) >> 11;
 	func = (inst & FUNCT);
-	addr = (inst & 0x3ffffff);
+	addr = (inst & 0x03ffffff);
 	shamt = (inst & SHAMT) >> 6;
 
 	if ((inst & 0xffff) >= 0x8000)//shift immediate value
@@ -297,7 +287,7 @@ void process_ID() {
 	ID_EX_pipeline_buffer.rs = rs; // inst [21-25]
 	ID_EX_pipeline_buffer.rt = rt; // inst [16-20]
 	ID_EX_pipeline_buffer.rd = rd; // inst [11-15]
-	ID_EX_pipeline_buffer.imm = imm;
+	ID_EX_pipeline_buffer.s_imm = s_imm;
 	ID_EX_pipeline_buffer.opcode = opcode; // inst [21-25]
 	ID_EX_pipeline_buffer.func = func; // inst [16-20]
 	ID_EX_pipeline_buffer.addr = addr; // inst [11-15]
@@ -311,7 +301,7 @@ void process_ID() {
 	}
 	if (isDebug) {
 		printf("*debug process_ID: CURRENTPC 0x%08x, instr 0x%08x\n", ID_EX_pipeline_buffer.CURRENTPC, inst);
-		printf("    RS %d, REG1 %d, RT %d, REG2 %d, RD %d, imm %08x, shamt %d\n", rs, REG[ID_EX_pipeline_buffer.rs], rt, REG[ID_EX_pipeline_buffer.rd], rd, ID_EX_pipeline_buffer.imm, ID_EX_pipeline_buffer.shamt);
+		printf("    RS %d, RS_VALUE %08x, RT %d, RD_VALUE %08x, RD %d, imm %08x, shamt %d\n", rs, REG[ID_EX_pipeline_buffer.rs], rt, REG[ID_EX_pipeline_buffer.rd], rd, ID_EX_pipeline_buffer.imm, ID_EX_pipeline_buffer.shamt);
 	}
 }
 
@@ -325,16 +315,16 @@ void generate_control_signals(uint32_t instr, int opcode, int func, int addr, in
 	bool jal = false;
 	bool jumpandreturn = false;
 	bool ALUinstruction = true;
-
+	bool jumpr = false;
 
 	if (opcode == 0) {                               // R-type
-		ID_EX_pipeline_buffer.RegDst = 1;
-		ID_EX_pipeline_buffer.ALUSrc = 0;
-		ID_EX_pipeline_buffer.MEM_Branch = 0;
-		ID_EX_pipeline_buffer.MEM_MemRead = 0;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 0;
-		ID_EX_pipeline_buffer.WB_RegWrite = 1;
-		ID_EX_pipeline_buffer.WB_MemToReg = 0;
+		ID_EX_pipeline_buffer.RegDst = true;
+		ID_EX_pipeline_buffer.ALUSrc = false;
+		ID_EX_pipeline_buffer.MEM_Branch = false;
+		ID_EX_pipeline_buffer.MEM_MemRead = false;
+		ID_EX_pipeline_buffer.MEM_MemWrite = false;
+		ID_EX_pipeline_buffer.WB_RegWrite = true;
+		ID_EX_pipeline_buffer.WB_MemToReg = false;
 		switch (func) {
 		case ADDU:                          // addu
 			ID_EX_pipeline_buffer.ALUControl = 0;
@@ -345,6 +335,7 @@ void generate_control_signals(uint32_t instr, int opcode, int func, int addr, in
 		case JR:                          // jr
 			jump = true;
 			jumpandreturn = true;
+			jumpr = true;
 			stall_IF_ID_count = 1 + 1;
 			ALUinstruction = false;
 			break;
@@ -373,24 +364,24 @@ void generate_control_signals(uint32_t instr, int opcode, int func, int addr, in
 	}
 	else if (opcode == J) {             // j
 		jump = true;
-		ID_EX_pipeline_buffer.MEM_Branch = 0;
-		ID_EX_pipeline_buffer.MEM_MemRead = 0;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 0;
-		ID_EX_pipeline_buffer.WB_RegWrite = 0;
+		ID_EX_pipeline_buffer.MEM_Branch = false;
+		ID_EX_pipeline_buffer.MEM_MemRead = false;
+		ID_EX_pipeline_buffer.MEM_MemWrite = false;
+		ID_EX_pipeline_buffer.WB_RegWrite = false;
 		stall_IF_ID_count = 1 + 1;
 		ALUinstruction = false;
 
 	}
 	else if (opcode == JAL) {             // jal
 		jump = true;
-		ID_EX_pipeline_buffer.RegDst = 1;
+		ID_EX_pipeline_buffer.RegDst = true;
 		ID_EX_pipeline_buffer.ALUControl = 0;
-		ID_EX_pipeline_buffer.ALUSrc = 1;
-		ID_EX_pipeline_buffer.MEM_Branch = 0;
-		ID_EX_pipeline_buffer.MEM_MemRead = 0;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 0;
-		ID_EX_pipeline_buffer.WB_RegWrite = 1;
-		ID_EX_pipeline_buffer.WB_MemToReg = 0;
+		ID_EX_pipeline_buffer.ALUSrc = true;
+		ID_EX_pipeline_buffer.MEM_Branch = false;
+		ID_EX_pipeline_buffer.MEM_MemRead = false;
+		ID_EX_pipeline_buffer.MEM_MemWrite = false;
+		ID_EX_pipeline_buffer.WB_RegWrite = true;
+		ID_EX_pipeline_buffer.WB_MemToReg = false;
 		jal = true;
 		stall_IF_ID_count = 1 + 1;
 		ALUinstruction = false;
@@ -398,99 +389,117 @@ void generate_control_signals(uint32_t instr, int opcode, int func, int addr, in
 		// I-type
 	}
 	else if (opcode == LW) {          // lw
-		ID_EX_pipeline_buffer.RegDst = 0;
+		ID_EX_pipeline_buffer.RegDst = false;
 		ID_EX_pipeline_buffer.ALUControl = 0;
-		ID_EX_pipeline_buffer.ALUSrc = 1;
-		ID_EX_pipeline_buffer.MEM_Branch = 0;
-		ID_EX_pipeline_buffer.MEM_MemRead = 1;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 0;
-		ID_EX_pipeline_buffer.WB_RegWrite = 1;
-		ID_EX_pipeline_buffer.WB_MemToReg = 1;
+		ID_EX_pipeline_buffer.ALUSrc = true;
+		ID_EX_pipeline_buffer.MEM_Branch = false;
+		ID_EX_pipeline_buffer.MEM_MemRead = true;
+		ID_EX_pipeline_buffer.MEM_MemWrite = false;
+		ID_EX_pipeline_buffer.WB_RegWrite = true;
+		ID_EX_pipeline_buffer.WB_MemToReg = true;
 		ALUinstruction = false;
 
 	}
 	else if (opcode == SW) {          // sw
 		ID_EX_pipeline_buffer.ALUControl = 0;
-		ID_EX_pipeline_buffer.ALUSrc = 1;
-		ID_EX_pipeline_buffer.MEM_Branch = 0;
-		ID_EX_pipeline_buffer.MEM_MemRead = 0;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 1;
-		ID_EX_pipeline_buffer.WB_RegWrite = 0;
+		ID_EX_pipeline_buffer.ALUSrc = true;
+		ID_EX_pipeline_buffer.MEM_Branch = false;
+		ID_EX_pipeline_buffer.MEM_MemRead = false;
+		ID_EX_pipeline_buffer.MEM_MemWrite = true;
+		ID_EX_pipeline_buffer.WB_RegWrite = false;
 		ALUinstruction = false;
 
 	}
 	else if (opcode == BEQ) {           // beq
 		ID_EX_pipeline_buffer.ALUControl = 1;
-		ID_EX_pipeline_buffer.ALUSrc = 0;
-		ID_EX_pipeline_buffer.MEM_Branch = 1;
-		ID_EX_pipeline_buffer.MEM_MemRead = 0;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 0;
-		ID_EX_pipeline_buffer.WB_RegWrite = 0;
-		stall_IF_ID_count = 3 + 1;
+		ID_EX_pipeline_buffer.ALUSrc = false;
+		ID_EX_pipeline_buffer.MEM_Branch = true;
+		ID_EX_pipeline_buffer.MEM_MemRead = false;
+		ID_EX_pipeline_buffer.MEM_MemWrite = false;
+		ID_EX_pipeline_buffer.WB_RegWrite = false;
+		if (!branchPredictionEnabled) stall_IF_ID_count = 3 + 1;
+		else {
+			stall_IF_ID_count = 1 + 1;
+			PC_buffer = CURRENT_STATE.IF_ID_pipeline.NPC + (IMM(instr) << 2);
+		}
 
 	}
 	else if (opcode == BNE) {           // bne
 		ID_EX_pipeline_buffer.ALUControl = 11;
-		ID_EX_pipeline_buffer.ALUSrc = 0;
-		ID_EX_pipeline_buffer.MEM_Branch = 1;
-		ID_EX_pipeline_buffer.MEM_MemRead = 0;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 0;
-		ID_EX_pipeline_buffer.WB_RegWrite = 0;
-		stall_IF_ID_count = 3 + 1;
+		ID_EX_pipeline_buffer.ALUSrc = false;
+		ID_EX_pipeline_buffer.MEM_Branch = true;
+		ID_EX_pipeline_buffer.MEM_MemRead = false;
+		ID_EX_pipeline_buffer.MEM_MemWrite = false;
+		ID_EX_pipeline_buffer.WB_RegWrite = false;
+		if (!branchPredictionEnabled) stall_IF_ID_count = 3 + 1;
+		else {
+			stall_IF_ID_count = 1 + 1;
+			PC_buffer = CURRENT_STATE.IF_ID_pipeline.NPC + (IMM(instr) << 2);
+		}
 	}
 	else if (opcode == ADDIU) {           // addiu
-		ID_EX_pipeline_buffer.RegDst = 0;
+		ID_EX_pipeline_buffer.RegDst = false;
 		ID_EX_pipeline_buffer.ALUControl = 0;
-		ID_EX_pipeline_buffer.ALUSrc = 1;
-		ID_EX_pipeline_buffer.MEM_Branch = 0;
-		ID_EX_pipeline_buffer.MEM_MemRead = 0;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 0;
-		ID_EX_pipeline_buffer.WB_RegWrite = 1;
-		ID_EX_pipeline_buffer.WB_MemToReg = 0;
+		ID_EX_pipeline_buffer.ALUSrc = true	;
+		ID_EX_pipeline_buffer.MEM_Branch = false;
+		ID_EX_pipeline_buffer.MEM_MemRead = false;
+		ID_EX_pipeline_buffer.MEM_MemWrite = false;
+		ID_EX_pipeline_buffer.WB_RegWrite = true;
+		ID_EX_pipeline_buffer.WB_MemToReg = false;
 	}
 	else if (opcode == ANDI) {           // andi
-		ID_EX_pipeline_buffer.RegDst = 0;
+	ID_EX_pipeline_buffer.RegDst = false;
 		ID_EX_pipeline_buffer.ALUControl = 2;
-		ID_EX_pipeline_buffer.ALUSrc = 1;
-		ID_EX_pipeline_buffer.MEM_Branch = 0;
-		ID_EX_pipeline_buffer.MEM_MemRead = 0;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 0;
-		ID_EX_pipeline_buffer.WB_RegWrite = 1;
-		ID_EX_pipeline_buffer.WB_MemToReg = 0;
+		ID_EX_pipeline_buffer.ALUSrc = true;
+		ID_EX_pipeline_buffer.MEM_Branch = false;
+		ID_EX_pipeline_buffer.MEM_MemRead = false;
+		ID_EX_pipeline_buffer.MEM_MemWrite = false;
+		ID_EX_pipeline_buffer.WB_RegWrite = true;
+		ID_EX_pipeline_buffer.WB_MemToReg = false;
 
 	}
 	else if (opcode == LUI) {           // lui
-		ID_EX_pipeline_buffer.RegDst = 0;
+		ID_EX_pipeline_buffer.RegDst = false;
 		ID_EX_pipeline_buffer.ALUControl = 10;
-		ID_EX_pipeline_buffer.ALUSrc = 1;
-		ID_EX_pipeline_buffer.MEM_Branch = 0;
-		ID_EX_pipeline_buffer.MEM_MemRead = 0;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 0;
-		ID_EX_pipeline_buffer.WB_RegWrite = 1;
-		ID_EX_pipeline_buffer.WB_MemToReg = 0;
+		ID_EX_pipeline_buffer.ALUSrc = true;
+		ID_EX_pipeline_buffer.MEM_Branch = false;
+		ID_EX_pipeline_buffer.MEM_MemRead = false;
+		ID_EX_pipeline_buffer.MEM_MemWrite = false;
+		ID_EX_pipeline_buffer.WB_RegWrite = true;
+		ID_EX_pipeline_buffer.WB_MemToReg = false;
 
 	}
 	else if (opcode == ORI) {           // ori
-		ID_EX_pipeline_buffer.RegDst = 0;
+		ID_EX_pipeline_buffer.RegDst = false;
 		ID_EX_pipeline_buffer.ALUControl = 3;
-		ID_EX_pipeline_buffer.ALUSrc = 1;
-		ID_EX_pipeline_buffer.MEM_Branch = 0;
-		ID_EX_pipeline_buffer.MEM_MemRead = 0;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 0;
-		ID_EX_pipeline_buffer.WB_RegWrite = 1;
-		ID_EX_pipeline_buffer.WB_MemToReg = 0;
+		ID_EX_pipeline_buffer.ALUSrc = true;
+		ID_EX_pipeline_buffer.MEM_Branch = false;
+		ID_EX_pipeline_buffer.MEM_MemRead = false;
+		ID_EX_pipeline_buffer.MEM_MemWrite = false;
+		ID_EX_pipeline_buffer.WB_RegWrite = true;
+		ID_EX_pipeline_buffer.WB_MemToReg = false;
 
 	}
 	else if (opcode == SLTIU) {           // sltiu
-		ID_EX_pipeline_buffer.RegDst = 0;
+		ID_EX_pipeline_buffer.RegDst = false;
 		ID_EX_pipeline_buffer.ALUControl = 8;
-		ID_EX_pipeline_buffer.ALUSrc = 1;
-		ID_EX_pipeline_buffer.MEM_Branch = 0;
-		ID_EX_pipeline_buffer.MEM_MemRead = 0;
-		ID_EX_pipeline_buffer.MEM_MemWrite = 0;
-		ID_EX_pipeline_buffer.WB_RegWrite = 1;
-		ID_EX_pipeline_buffer.WB_MemToReg = 0;
+		ID_EX_pipeline_buffer.ALUSrc = true;
+		ID_EX_pipeline_buffer.MEM_Branch = false;
+		ID_EX_pipeline_buffer.MEM_MemRead = false;
+		ID_EX_pipeline_buffer.MEM_MemWrite = false;
+		ID_EX_pipeline_buffer.WB_RegWrite = true;
+		ID_EX_pipeline_buffer.WB_MemToReg = false;
 
+	}
+	else if (opcode == SLTI) {           // sltiu
+	ID_EX_pipeline_buffer.RegDst = false;
+	ID_EX_pipeline_buffer.ALUControl = 8;
+	ID_EX_pipeline_buffer.ALUSrc = true;
+	ID_EX_pipeline_buffer.MEM_Branch = false;
+	ID_EX_pipeline_buffer.MEM_MemRead = false;
+	ID_EX_pipeline_buffer.MEM_MemWrite = false;
+	ID_EX_pipeline_buffer.WB_RegWrite = true;
+	ID_EX_pipeline_buffer.WB_MemToReg = false;
 	}
 	else {
 		printf("Unrecognized OPCODE : %d\n", opcode);
@@ -498,9 +507,17 @@ void generate_control_signals(uint32_t instr, int opcode, int func, int addr, in
 
 
 	if (jump) {
-		PC_jump = ((CURRENT_STATE.PC + 4) & 0xF0000000) + (addr << 2);
-		if (globalJumpAndReturn) {
-			PC_jump = REG[31];
+
+		if (jumpr)
+		{
+			PC_jump = REG[rs];
+		}
+		else 
+		{
+			PC_jump = ((CURRENT_STATE.PC + 4) & 0xF0000000) + (addr << 2);
+			if (globalJumpAndReturn) {
+				PC_jump = REG[31];
+			}
 		}
 	}
 
@@ -556,14 +573,14 @@ void process_EX() {
 	EX_MEM_pipeline_buffer.Branch = prevID_EX_pipeline.MEM_Branch;
 
 	// PC (for Branch instruction)
-	EX_MEM_pipeline_buffer.NPC = prevID_EX_pipeline.NPC + (prevID_EX_pipeline.imm << 2);
+	EX_MEM_pipeline_buffer.NPC = prevID_EX_pipeline.NPC + (prevID_EX_pipeline.s_imm << 2);
 
 	//shift data
 	// transfer possible register write destinations (11-15 and 16-20)
 	EX_MEM_pipeline_buffer.rs = prevID_EX_pipeline.rs; // inst [21-25]
 	EX_MEM_pipeline_buffer.rt = prevID_EX_pipeline.rt; // inst [16-20]
 	EX_MEM_pipeline_buffer.rd = prevID_EX_pipeline.rd; // inst [11-15]
-	EX_MEM_pipeline_buffer.imm = prevID_EX_pipeline.imm;
+	EX_MEM_pipeline_buffer.s_imm = prevID_EX_pipeline.s_imm;
 	EX_MEM_pipeline_buffer.opcode = prevID_EX_pipeline.opcode; // inst [21-25]
 	EX_MEM_pipeline_buffer.func = prevID_EX_pipeline.func; // inst [16-20]
 	EX_MEM_pipeline_buffer.addr = prevID_EX_pipeline.addr; // inst [11-15]
@@ -574,6 +591,8 @@ void process_EX() {
 	int forwardA = 00;
 	int forwardB = 00;
 
+
+	
 	// Forwarding unit.
 
 	if (isDebug) printf("RegDstNum %d, RS %d, RT %d\n", CURRENT_STATE.EX_MEM_pipeline.RegDstNum, CURRENT_STATE.ID_EX_pipeline.rs, CURRENT_STATE.ID_EX_pipeline.rt);
@@ -670,13 +689,13 @@ void process_EX() {
 	// if ALUSrc == 1, the second ALU operand is the sign-extended, lower 16 bits of the instruction.
 	// if ALUSrc == 0, the second ALU operand comes from the second register file output. (Read data 2).
 	if (prevID_EX_pipeline.ALUSrc) {
-		ALUinput2 = prevID_EX_pipeline.imm;
+		ALUinput2 = prevID_EX_pipeline.s_imm;
 	}
 
 
 
 	// calculate ALU control
-	int funct_field = (prevID_EX_pipeline.imm & FUNCT); // extract funct field from instruction[0~15]
+	int funct_field = (prevID_EX_pipeline.s_imm & FUNCT); // extract funct field from instruction[0~15]
 	int control_line = prevID_EX_pipeline.ALUControl;
 
 	// Special case for shift commands (srl, sll)
@@ -699,6 +718,8 @@ void process_EX() {
 	else {
 		EX_MEM_pipeline_buffer.RegDstNum = prevID_EX_pipeline.rt;
 	}
+
+
 	if (isDebug) {
 		printf("*debug process_EX: CURRENTPC 0x%08x, instr %08x\n", EX_MEM_pipeline_buffer.CURRENTPC, EX_MEM_pipeline_buffer.instr_debug);
 		printf("    forwardA %d, forwardB %d, ALUinput1 %d, ALUinput2 %d, ALU_OUT %d\n", forwardA, forwardB, ALUinput1, ALUinput2, ALUresult);
@@ -766,10 +787,14 @@ void process_MEM() {
 		if (prevEX_MEM_pipeline.zero) {
 			// if the branch Prediction was enabled, this is handled by generatecontrolsignal in ID stage.
 
-			PC_jump = prevEX_MEM_pipeline.NPC;
+			if (!branchPredictionEnabled) {
+				PC_jump = prevEX_MEM_pipeline.NPC;
+			}
 
 		}
 		else {
+			if (isDebug) printf("Branch prediction failed!!!!\n");
+			if (branchPredictionEnabled) branchFlush = true;
 			PC_buffer = prevEX_MEM_pipeline.CURRENTPC + 4;
 		}
 	}
@@ -814,7 +839,7 @@ void process_MEM() {
 /*=====================================================*/
 void mem_write(uint32_t address, uint32_t value)
 {
-	value = (value & 0xff) << 24 | (value & 0xff00) << 8 | (value & 0xff0000) >> 8 | (value & 0xff000000) >> 24;
+	//value = (value & 0xff) << 24 | (value & 0xff00) << 8 | (value & 0xff0000) >> 8 | (value & 0xff000000) >> 24;
 	MEM[address / 0x4] = value;
 	return;
 }
@@ -855,7 +880,7 @@ void flush_ID_EX() {
 	CURRENT_STATE.ID_EX_pipeline.jump = false;
 	CURRENT_STATE.ID_EX_pipeline.v1 = 0;
 	CURRENT_STATE.ID_EX_pipeline.v2 = 0;
-	CURRENT_STATE.ID_EX_pipeline.imm = 0;
+	CURRENT_STATE.ID_EX_pipeline.s_imm = 0;
 	CURRENT_STATE.ID_EX_pipeline.rs = 0;
 	CURRENT_STATE.ID_EX_pipeline.rt = 0;
 	CURRENT_STATE.ID_EX_pipeline.rd = 0;
@@ -879,6 +904,17 @@ void flush_EX_MEM() {
 	CURRENT_STATE.EX_MEM_pipeline.data2 = 0;
 	CURRENT_STATE.EX_MEM_pipeline.RegDstNum = 0;
 	CURRENT_STATE.EX_MEM_pipeline.instr_debug = 0;
+	CURRENT_STATE.EX_MEM_pipeline.rs = 0;
+	CURRENT_STATE.EX_MEM_pipeline.rt = 0;
+	CURRENT_STATE.EX_MEM_pipeline.rd = 0;
+	CURRENT_STATE.EX_MEM_pipeline.s_imm = 0;
+	CURRENT_STATE.EX_MEM_pipeline.opcode = 0;
+	CURRENT_STATE.EX_MEM_pipeline.func = 0;
+	CURRENT_STATE.EX_MEM_pipeline.addr = 0;
+	CURRENT_STATE.EX_MEM_pipeline.imm = 0;
+	CURRENT_STATE.EX_MEM_pipeline.shamt = 0;
+	CURRENT_STATE.EX_MEM_pipeline.v1 = 0;
+	CURRENT_STATE.EX_MEM_pipeline.v2 = 0;
 }
 
 /***************************************************************/
@@ -897,7 +933,7 @@ void rdump() {
 	printf("PC: 0x%08x\n", CURRENT_STATE.PC + 4);       // adjusted
 	printf("Registers:\n");
 	for (k = 0; k < MIPS_REGS; k++)
-		printf("R%d: 0x%08x\n", k, CURRENT_STATE.REGS[k]);
+		printf("R%d: 0x%08x\n", k, REG[k]);
 	printf("\n");
 }
 
