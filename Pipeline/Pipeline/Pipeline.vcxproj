@@ -124,10 +124,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="MIPSPipeline3.c" />
+    <ClCompile Include="MIPS.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="run.h" />
     <ClInclude Include="util.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
