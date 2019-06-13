@@ -68,7 +68,6 @@ int target_j;
 int target_brq;
 int inst;
 int i;
-int num_inst = 0;
 
 struct controlsig
 {
@@ -101,13 +100,8 @@ void main()
 	{
 		Reg[i] = 0;
 	}
-
-	init_reg();
-
 	loadprogram();
 	runprog();
-
-
 	printf("Total R Format: %d\n", rform);
 	printf("Total I Format: %d\n", iform);
 	printf("Total J Format: %d\n", jform);
@@ -117,44 +111,15 @@ void main()
 	printf("Final Result: R[2] = %d\n", Reg[2]);
 }
 
-void loadprogram()
-{
-	FILE* fp = NULL;
-	unsigned int data = 0;
-	int ret = 0;
-	int i = 0;
-	unsigned int inst2;
-
-	fp = fopen("test_prog/input4.bin", "rb");
-	if (fp == NULL)
-	{
-		printf("no file: %s\n", "input4.bin");
-		return;
-	}
-
-	while (1)
-	{
-		ret = fread(&data, sizeof(int), 1, fp);
-		if (ret == 0)
-			break;
-
-		inst2 = (data & 0xff) << 24 | (data & 0xff00) << 8 | (data & 0xff0000) >> 8 | (data & 0xff000000) >> 24;
-		Memory[i++] = inst2;
-		//printf("Memory[0x%08X]: 0x%08X\n", i << 2, inst);
-		num_inst++;
-	}
-	fclose(fp);
-}
-
-
 void runprog()
 {
-	while(1)
+	while (1)
 	{
-		
-		if (pc == 0xFFFFFFFF)
-			return;
+
+		if (pc == 0xffffffff)
+			break;
 		progexecute();
+		gClock++;
 	}
 }
 
@@ -168,18 +133,19 @@ void progexecute()
 void init_reg()
 {
 	//init
+
 	Reg[29] = 0x100000;   //sp
 	Reg[31] = 0xFFFFFFFF; //return addr
 }
 
+int inst_fetch(int pc)
+{
+	return Memory[pc / 4];
+}
+
 void idec()
 {
-	//local var
-	//printf("========= Cycle 0x%08X =======\n", gClock);
-	npc = 0;
-	//fetch
-	//printf("pc: 0x%08x, inst: 0x%08X ", pc, inst);
-	//inst = Memory[pc / 4];
+	//decode
 	opcode = (inst & OPCODE) >> 26;
 	rs = (inst & RS) >> 21;
 	rt = (inst & RT) >> 16;
@@ -205,21 +171,11 @@ void idec()
 	target_brq = s_imm << 2;
 
 	generate_controlsig();
-
-	//printf("0x%08X (Opcode: 0x%x)", inst, opcode);
-	//printf("opcode: 0x%X rs:%d rt:%d rd:%d func:0x%x\n", opcode, rs, rt, rd, funct);
-	//printf("s_imm: 0x%08X v1: 0x%08X v2:0x%08x\n", s_imm, v1, v2);
 }
 
 void generate_controlsig()
 {
-	if (inst == 0x00000000)
-	{
-		gClock = gClock + 1;
-		pc = pc + 4;
-		//printf("\nDo nothing\n\n");
-	}
-	else if (opcode == RINST)
+	if (opcode == RINST)
 	{
 		//printf("[Type R Format]\n");
 		control_sig.RegDest = 1;
@@ -262,7 +218,13 @@ void generate_controlsig()
 
 void iex()
 {
-	
+	if (inst == 0x00000000)
+	{
+		gClock = gClock + 1;
+		pc = pc + 4;
+		//printf("\nDo nothing\n\n");
+	}
+
 	if (control_sig.AluSrc == 1)
 	{
 		switch (opcode)
@@ -453,10 +415,36 @@ void iex()
 		pc = target_j;
 		//printf("jal R[31] = 0x%x:JumpAddr 0x%x\n\n", Reg[31], pc);
 	}
-	gClock++;
+}
+
+void loadprogram()
+{
+	FILE* fp = NULL;
+	unsigned int data = 0;
+	int ret = 0;
+	int i = 0;
+	unsigned int inst2;
+
+	fp = fopen("test_prog/simple.bin", "rb");
+	if (fp == NULL)
+	{
+		printf("no file: %s\n", "input4.bin");
+		return;
+	}
+	while (1)
+	{
+		ret = fread(&data, sizeof(int), 1, fp);
+		if (ret == 0)
+			break;
+
+		inst2 = (data & 0xff) << 24 | (data & 0xff00) << 8 | (data & 0xff0000) >> 8 | (data & 0xff000000) >> 24;
+		Memory[i++] = inst2;
+		//printf("Memory[0x%08X]: 0x%08X\n", i << 2, inst);
+	}
+	fclose(fp);
 }
 
 void ifetch()
 {
-	inst = Memory[pc/4];
+	inst = inst_fetch(pc);
 }
